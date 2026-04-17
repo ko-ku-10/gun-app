@@ -13,90 +13,90 @@
         .info { text-align: center; margin-bottom: 20px; }
         .ammo { font-size: 3rem; font-weight: bold; color: #007AFF; }
         .status { font-size: 1.2rem; color: #888; margin-top: 10px; }
-        .grid { display: grid; grid-template-columns: 1fr 1fr; gap: 10px; width: 90%; }
-        button { padding: 15px; background: #333; color: white; border: 1px solid #555; border-radius: 10px; font-size: 0.8rem; }
-        .active { background: #007AFF; border-color: white; }
+        #start_btn { padding: 20px 40px; font-size: 1.5rem; background: #007AFF; color: white; border: none; border-radius: 50px; cursor: pointer; }
     </style>
 </head>
 <body>
 
-    <div class="info">
-        <div class="ammo" id="ammo_count">10 / 10</div>
-        <div class="status" id="action_label">タップして開始</div>
+    <div id="setup_screen">
+        <button id="start_btn">START (音を有効にする)</button>
     </div>
 
-    <div class="grid">
-        <button onclick="setup(0, 'https://soundeffect-lab.info/sound/battle/mp3/handgun-firing1.mp3')">音1:発射</button>
-        <button onclick="setup(1, 'https://soundeffect-lab.info/sound/battle/mp3/handgun-out-bullets1.mp3')">音2:リロード</button>
-        <button onclick="setup(2, 'https://soundeffect-lab.info/sound/battle/mp3/handgun-ready1.mp3')">音3:構え</button>
-        <button onclick="setup(3, 'https://soundeffect-lab.info/sound/battle/mp3/handgun-out-bullets1.mp3')">音4:空撃ち</button>
+    <div id="app_screen" style="display: none;">
+        <div class="info">
+            <div class="ammo" id="ammo_count">10 / 10</div>
+            <div class="status" id="action_label">構えてください</div>
+        </div>
     </div>
 
     <script>
-        let sounds = [new Audio(), new Audio(), new Audio(), new Audio()];
+        // 同じ階層にアップロードしたファイル名を指定
+        const soundFiles = ['shot.mp3', 'reload.mp3', 'ready.mp3', 'empty.mp3'];
+        const sounds = soundFiles.map(file => new Audio(file));
+        
         let ammo = 10;
-        let isReady = false;
-        let lastTrigger = 0; // 連続検知防止用
-        let mode = "READY"; // READY, DOWN, RELOADED
+        let lastTrigger = 0;
+        let mode = "READY";
 
-        async function setup(idx, url) {
+        document.getElementById('start_btn').addEventListener('click', async () => {
+            // iOS/Androidのロック解除
             if (typeof DeviceOrientationEvent.requestPermission === 'function') {
-                await DeviceOrientationEvent.requestPermission();
-            }
-            sounds[idx].src = url;
-            sounds[idx].load();
-            document.querySelectorAll('button')[idx].classList.add('active');
-            isReady = true;
-            document.getElementById('action_label').innerText = "構えてください";
-        }
-
-        window.addEventListener('deviceorientation', (event) => {
-            if (!isReady) return;
-
-            // 横持ち縦構えの場合、主に gamma (左右の傾き) が前後の動きになります
-            let pitch = event.gamma; 
-            let now = Date.now();
-            let label = document.getElementById('action_label');
-            let ammoDisp = document.getElementById('ammo_count');
-
-            // 1. 発射検知（上にクイッ：数値が急激に上がる）
-            if (pitch < -60 && now - lastTrigger > 300) {
-                if (ammo > 0) {
-                    playSound(0); // 発射
-                    ammo--;
-                    label.innerText = "BANG!";
-                } else {
-                    playSound(3); // 弾切れ音
-                    label.innerText = "EMPTY (Reload!)";
-                }
-                lastTrigger = now;
-                ammoDisp.innerText = ammo + " / 10";
+                const res = await DeviceOrientationEvent.requestPermission();
+                if (res !== 'granted') return alert('センサー許可が必要です');
             }
 
-            // 2. リロード動作（スマホの先を真下に向ける）
-            if (pitch > 20) {
-                if (mode !== "DOWN") {
-                    playSound(1); // リロード開始音
-                    label.innerText = "RELOADING...";
-                    mode = "DOWN";
-                }
-            }
+            // 音を一度再生して即停止（ブラウザの再生制限を解除）
+            sounds.forEach(s => { s.play().then(() => { s.pause(); s.currentTime = 0; }).catch(()=>{}); });
 
-            // 3. 基本の形に戻った時（水平〜構えの位置に戻る）
-            if (mode === "DOWN" && pitch < -10 && pitch > -40) {
-                playSound(2); // ガチャッという構え音
-                ammo = 10;
-                ammoDisp.innerText = ammo + " / 10";
-                label.innerText = "READY";
-                mode = "READY";
-            }
+            document.getElementById('setup_screen').style.display = 'none';
+            document.getElementById('app_screen').style.display = 'block';
+            initSensor();
         });
 
+        function initSensor() {
+            window.addEventListener('deviceorientation', (event) => {
+                let pitch = event.gamma; 
+                let now = Date.now();
+                let label = document.getElementById('action_label');
+                let ammoDisp = document.getElementById('ammo_count');
+
+                // 発射：上にクイッ
+                if (pitch < -60 && now - lastTrigger > 300) {
+                    if (ammo > 0) {
+                        playSound(0); // shot.mp3
+                        ammo--;
+                        label.innerText = "BANG!";
+                    } else {
+                        playSound(3); // empty.mp3
+                        label.innerText = "EMPTY!";
+                    }
+                    lastTrigger = now;
+                    ammoDisp.innerText = ammo + " / 10";
+                }
+
+                // リロード：下に向ける
+                if (pitch > 20) {
+                    if (mode !== "DOWN") {
+                        playSound(1); // reload.mp3
+                        label.innerText = "RELOADING...";
+                        mode = "DOWN";
+                    }
+                }
+
+                // 構え直し：水平に戻す
+                if (mode === "DOWN" && pitch < -10 && pitch > -40) {
+                    playSound(2); // ready.mp3
+                    ammo = 10;
+                    ammoDisp.innerText = ammo + " / 10";
+                    label.innerText = "READY";
+                    mode = "READY";
+                }
+            });
+        }
+
         function playSound(idx) {
-            if (sounds[idx].src) {
-                sounds[idx].currentTime = 0;
-                sounds[idx].play().catch(e => {});
-            }
+            sounds[idx].currentTime = 0;
+            sounds[idx].play().catch(e => console.log(e));
         }
     </script>
 </body>
