@@ -3,100 +3,135 @@
 <head>
     <meta charset="UTF-8">
     <meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0, user-scalable=no">
-    <title>Gun Simulator</title>
+    <title>Gun Button Sim</title>
     <style>
+        /* 画面の基本設定：横持ちを想定 */
         body {
-            margin: 0; background-color: #1a1a1a; color: white;
-            font-family: sans-serif; display: flex; flex-direction: column;
-            justify-content: center; align-items: center; height: 100vh; overflow: hidden;
+            margin: 0; padding: 0;
+            background-color: #1a1a1a; color: white;
+            font-family: sans-serif;
+            display: flex; flex-direction: column;
+            height: 100vh; overflow: hidden;
+            user-select: none;
         }
-        .info { text-align: center; margin-bottom: 20px; }
-        .ammo { font-size: 3rem; font-weight: bold; color: #007AFF; }
-        .status { font-size: 1.2rem; color: #888; margin-top: 10px; }
-        #start_btn { padding: 20px 40px; font-size: 1.5rem; background: #007AFF; color: white; border: none; border-radius: 50px; cursor: pointer; }
+
+        /* 弾数表示エリア */
+        .info-panel {
+            flex: 1; display: flex; flex-direction: column;
+            justify-content: center; align-items: center;
+            background: linear-gradient(to bottom, #222, #1a1a1a);
+        }
+        .ammo { font-size: 4rem; font-weight: bold; color: #007AFF; }
+        .status { font-size: 1.2rem; color: #888; }
+
+        /* ボタン配置：スマホの両端に配置するイメージ */
+        .controls {
+            display: grid;
+            grid-template-columns: 1fr 1fr; /* 左右2分割 */
+            height: 60vh; /* 画面の下半分以上をボタンにする */
+            gap: 10px; padding: 10px;
+        }
+
+        button {
+            border: none; border-radius: 15px;
+            font-size: 1.5rem; font-weight: bold; color: white;
+            transition: transform 0.1s, opacity 0.1s;
+            -webkit-tap-highlight-color: transparent; /* タップ時の青枠を消す */
+        }
+
+        button:active { transform: scale(0.95); opacity: 0.8; }
+
+        /* 各ボタンの色分け */
+        .btn-shot { background-color: #e74c3c; grid-row: span 1; } /* 発射：赤 */
+        .btn-empty { background-color: #555; }                   /* 空撃ち（確認用） */
+        .btn-reload { background-color: #2ecc71; }                /* リロード：緑 */
+        .btn-ready { background-color: #f1c40f; }                 /* 構え/安全：黄 */
+
+        /* 初期画面 */
+        #setup_screen {
+            position: fixed; inset: 0; background: #000; z-index: 100;
+            display: flex; justify-content: center; align-items: center;
+        }
+        #start_btn { padding: 20px 40px; font-size: 1.5rem; background: #007AFF; border-radius: 50px; border: none; color: white; }
     </style>
 </head>
 <body>
 
     <div id="setup_screen">
-        <button id="start_btn">START (音を有効にする)</button>
+        <button id="start_btn">タップして起動</button>
     </div>
 
-    <div id="app_screen" style="display: none;">
-        <div class="info">
-            <div class="ammo" id="ammo_count">10 / 10</div>
-            <div class="status" id="action_label">構えてください</div>
-        </div>
+    <div class="info-panel">
+        <div class="ammo" id="ammo_count">10 / 10</div>
+        <div class="status" id="action_label">READY</div>
+    </div>
+
+    <div class="controls">
+        <button class="btn-shot" onclick="triggerShot()">FIRE<br>(発射)</button>
+        <button class="btn-reload" onclick="triggerReload()">RELOAD<br>(装填)</button>
+        <button class="btn-ready" onclick="triggerReady()">SET<br>(構え)</button>
+        <button class="btn-empty" onclick="triggerEmpty()">EMPTY<br>(空撃ち)</button>
     </div>
 
     <script>
-        // 同じ階層にアップロードしたファイル名を指定
-        const soundFiles = ['shot.mp3', 'reload.mp3', 'ready.mp3', 'empty.mp3'];
-        const sounds = soundFiles.map(file => new Audio(file));
-        
+        // 音声ファイルの読み込み（前の手順でアップしたファイル名）
+        const sounds = {
+            shot: new Audio('shot.mp3'),
+            reload: new Audio('reload.mp3'),
+            ready: new Audio('ready.mp3'),
+            empty: new Audio('empty.mp3')
+        };
+
         let ammo = 10;
-        let lastTrigger = 0;
-        let mode = "READY";
 
-        document.getElementById('start_btn').addEventListener('click', async () => {
-            // iOS/Androidのロック解除
-            if (typeof DeviceOrientationEvent.requestPermission === 'function') {
-                const res = await DeviceOrientationEvent.requestPermission();
-                if (res !== 'granted') return alert('センサー許可が必要です');
-            }
-
-            // 音を一度再生して即停止（ブラウザの再生制限を解除）
-            sounds.forEach(s => { s.play().then(() => { s.pause(); s.currentTime = 0; }).catch(()=>{}); });
-
+        // 起動ボタン
+        document.getElementById('start_btn').addEventListener('click', () => {
+            // 音声のブラウザロック解除
+            Object.values(sounds).forEach(s => {
+                s.play().then(() => { s.pause(); s.currentTime = 0; }).catch(()=>{});
+            });
             document.getElementById('setup_screen').style.display = 'none';
-            document.getElementById('app_screen').style.display = 'block';
-            initSensor();
         });
 
-        function initSensor() {
-            window.addEventListener('deviceorientation', (event) => {
-                let pitch = event.gamma; 
-                let now = Date.now();
-                let label = document.getElementById('action_label');
-                let ammoDisp = document.getElementById('ammo_count');
-
-                // 発射：上にクイッ
-                if (pitch < -60 && now - lastTrigger > 300) {
-                    if (ammo > 0) {
-                        playSound(0); // shot.mp3
-                        ammo--;
-                        label.innerText = "BANG!";
-                    } else {
-                        playSound(3); // empty.mp3
-                        label.innerText = "EMPTY!";
-                    }
-                    lastTrigger = now;
-                    ammoDisp.innerText = ammo + " / 10";
-                }
-
-                // リロード：下に向ける
-                if (pitch > 20) {
-                    if (mode !== "DOWN") {
-                        playSound(1); // reload.mp3
-                        label.innerText = "RELOADING...";
-                        mode = "DOWN";
-                    }
-                }
-
-                // 構え直し：水平に戻す
-                if (mode === "DOWN" && pitch < -10 && pitch > -40) {
-                    playSound(2); // ready.mp3
-                    ammo = 10;
-                    ammoDisp.innerText = ammo + " / 10";
-                    label.innerText = "READY";
-                    mode = "READY";
-                }
-            });
+        function updateDisplay(text) {
+            document.getElementById('action_label').innerText = text;
+            document.getElementById('ammo_count').innerText = ammo + " / 10";
         }
 
-        function playSound(idx) {
-            sounds[idx].currentTime = 0;
-            sounds[idx].play().catch(e => console.log(e));
+        // 1. 発射
+        function triggerShot() {
+            if (ammo > 0) {
+                playSound('shot');
+                ammo--;
+                updateDisplay("BANG!");
+            } else {
+                playSound('empty');
+                updateDisplay("OUT OF AMMO");
+            }
+        }
+
+        // 2. リロード
+        function triggerReload() {
+            playSound('reload');
+            updateDisplay("RELOADING...");
+        }
+
+        // 3. 構え（リロード完了・弾数回復）
+        function triggerReady() {
+            playSound('ready');
+            ammo = 10;
+            updateDisplay("READY");
+        }
+
+        // 4. 空撃ち（手動で鳴らしたい場合）
+        function triggerEmpty() {
+            playSound('empty');
+            updateDisplay("CHECK EMPTY");
+        }
+
+        function playSound(name) {
+            sounds[name].currentTime = 0;
+            sounds[name].play().catch(e => console.log(e));
         }
     </script>
 </body>
