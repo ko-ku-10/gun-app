@@ -3,136 +3,156 @@
 <head>
     <meta charset="UTF-8">
     <meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0, user-scalable=no">
-    <title>Gun Button Sim</title>
+    <title>Tactical Gun Sim</title>
     <style>
-        /* 画面の基本設定：横持ちを想定 */
         body {
-            margin: 0; padding: 0;
-            background-color: #1a1a1a; color: white;
-            font-family: sans-serif;
-            display: flex; flex-direction: column;
-            height: 100vh; overflow: hidden;
-            user-select: none;
+            margin: 0; padding: 0; background-color: #121212; color: white;
+            font-family: sans-serif; display: flex; flex-direction: column;
+            height: 100vh; overflow: hidden; user-select: none;
         }
-
-        /* 弾数表示エリア */
-        .info-panel {
+        .header {
             flex: 1; display: flex; flex-direction: column;
             justify-content: center; align-items: center;
-            background: linear-gradient(to bottom, #222, #1a1a1a);
         }
-        .ammo { font-size: 4rem; font-weight: bold; color: #007AFF; }
-        .status { font-size: 1.2rem; color: #888; }
-
-        /* ボタン配置：スマホの両端に配置するイメージ */
+        .ammo { font-size: 3.5rem; font-weight: bold; color: #007AFF; }
+        .mode-badge {
+            padding: 5px 15px; background: #444; border-radius: 20px;
+            font-size: 1rem; margin-top: 5px; text-transform: uppercase;
+        }
         .controls {
-            display: grid;
-            grid-template-columns: 1fr 1fr; /* 左右2分割 */
-            height: 60vh; /* 画面の下半分以上をボタンにする */
-            gap: 10px; padding: 10px;
+            display: grid; grid-template-columns: 1fr 1fr;
+            height: 65vh; gap: 10px; padding: 15px;
         }
-
         button {
-            border: none; border-radius: 15px;
-            font-size: 1.5rem; font-weight: bold; color: white;
-            transition: transform 0.1s, opacity 0.1s;
-            -webkit-tap-highlight-color: transparent; /* タップ時の青枠を消す */
+            border: none; border-radius: 20px; font-size: 1.2rem; font-weight: bold;
+            color: white; cursor: pointer; -webkit-tap-highlight-color: transparent;
         }
+        .btn-fire { background: #c0392b; grid-column: span 2; font-size: 2rem; }
+        .btn-reload { background: #27ae60; }
+        .btn-mode { background: #2980b9; }
+        
+        button:active { opacity: 0.7; transform: scale(0.98); }
 
-        button:active { transform: scale(0.95); opacity: 0.8; }
-
-        /* 各ボタンの色分け */
-        .btn-shot { background-color: #e74c3c; grid-row: span 1; } /* 発射：赤 */
-        .btn-empty { background-color: #555; }                   /* 空撃ち（確認用） */
-        .btn-reload { background-color: #2ecc71; }                /* リロード：緑 */
-        .btn-ready { background-color: #f1c40f; }                 /* 構え/安全：黄 */
-
-        /* 初期画面 */
-        #setup_screen {
+        #overlay {
             position: fixed; inset: 0; background: #000; z-index: 100;
             display: flex; justify-content: center; align-items: center;
         }
-        #start_btn { padding: 20px 40px; font-size: 1.5rem; background: #007AFF; border-radius: 50px; border: none; color: white; }
+        #start_btn { padding: 20px 40px; font-size: 1.5rem; background: #007AFF; border: none; color: white; border-radius: 50px; }
     </style>
 </head>
 <body>
 
-    <div id="setup_screen">
-        <button id="start_btn">タップして起動</button>
-    </div>
+<div id="overlay">
+    <button id="start_btn">SYSTEM START</button>
+</div>
 
-    <div class="info-panel">
-        <div class="ammo" id="ammo_count">10 / 10</div>
-        <div class="status" id="action_label">READY</div>
-    </div>
+<div class="header">
+    <div class="ammo" id="ammo_count">12 / 12</div>
+    <div id="mode_display" class="mode-badge">SEMI-AUTO</div>
+</div>
 
-    <div class="controls">
-        <button class="btn-shot" onclick="triggerShot()">FIRE<br>(発射)</button>
-        <button class="btn-reload" onclick="triggerReload()">RELOAD<br>(装填)</button>
-        <button class="btn-ready" onclick="triggerReady()">SET<br>(構え)</button>
-        <button class="btn-empty" onclick="triggerEmpty()">EMPTY<br>(空撃ち)</button>
-    </div>
+<div class="controls">
+    <button class="btn-fire" id="fire_btn">FIRE</button>
+    <button class="btn-mode" id="mode_btn">MODE CHANGE</button>
+    <button class="btn-reload" id="reload_btn">RELOAD</button>
+</div>
 
-    <script>
-        // 音声ファイルの読み込み（前の手順でアップしたファイル名）
-        const sounds = {
-            shot: new Audio('shot.mp3'),
-            reload: new Audio('reload.mp3'),
-            ready: new Audio('ready.mp3'),
-            empty: new Audio('empty.mp3')
-        };
+<script>
+    const audioCtx = new (window.AudioContext || window.webkitAudioContext)();
+    const buffers = {};
+    let ammo = 12;
+    let isAuto = false;
+    let isReloading = false;
 
-        let ammo = 10;
+    // 音声ファイルのリスト
+    const soundFiles = {
+        shot: 'shot.mp3',
+        reload: 'reload.mp3',
+        ready: 'ready.mp3',
+        empty: 'empty.mp3'
+    };
 
-        // 起動ボタン
-        document.getElementById('start_btn').addEventListener('click', () => {
-            // 音声のブラウザロック解除
-            Object.values(sounds).forEach(s => {
-                s.play().then(() => { s.pause(); s.currentTime = 0; }).catch(()=>{});
-            });
-            document.getElementById('setup_screen').style.display = 'none';
-        });
+    // 音声を事前にデコードしてメモリに蓄える（遅延対策）
+    async function loadSound(name, url) {
+        const response = await fetch(url);
+        const arrayBuffer = await response.arrayBuffer();
+        buffers[name] = await audioCtx.decodeAudioData(arrayBuffer);
+    }
 
-        function updateDisplay(text) {
-            document.getElementById('action_label').innerText = text;
-            document.getElementById('ammo_count').innerText = ammo + " / 10";
+    // 音を鳴らす関数（Web Audio API）
+    function play(name) {
+        if (!buffers[name]) return;
+        const source = audioCtx.createBufferSource();
+        source.buffer = buffers[name];
+        source.connect(audioCtx.destination);
+        source.start(0);
+    }
+
+    // 初期化
+    document.getElementById('start_btn').addEventListener('click', async () => {
+        audioCtx.resume();
+        document.getElementById('start_btn').innerText = "LOADING...";
+        
+        // 全音源読み込み
+        await Promise.all(Object.entries(soundFiles).map(([name, url]) => loadSound(name, url)));
+        
+        document.getElementById('overlay').style.display = 'none';
+    });
+
+    // 発射処理
+    function fire() {
+        if (isReloading) return;
+        if (ammo > 0) {
+            play('shot');
+            ammo--;
+            updateUI();
+        } else {
+            play('empty');
         }
+    }
 
-        // 1. 発射
-        function triggerShot() {
-            if (ammo > 0) {
-                playSound('shot');
-                ammo--;
-                updateDisplay("BANG!");
-            } else {
-                playSound('empty');
-                updateDisplay("OUT OF AMMO");
-            }
-        }
+    // 連射（フルオート）対応のイベントリスナー
+    const fireBtn = document.getElementById('fire_btn');
+    let autoTimer = null;
 
-        // 2. リロード
-        function triggerReload() {
-            playSound('reload');
-            updateDisplay("RELOADING...");
+    fireBtn.addEventListener('pointerdown', (e) => {
+        e.preventDefault();
+        fire();
+        if (isAuto) {
+            autoTimer = setInterval(fire, 150); // 150ms間隔で連射
         }
+    });
 
-        // 3. 構え（リロード完了・弾数回復）
-        function triggerReady() {
-            playSound('ready');
-            ammo = 10;
-            updateDisplay("READY");
+    window.addEventListener('pointerup', () => {
+        if (autoTimer) {
+            clearInterval(autoTimer);
+            autoTimer = null;
         }
+    });
 
-        // 4. 空撃ち（手動で鳴らしたい場合）
-        function triggerEmpty() {
-            playSound('empty');
-            updateDisplay("CHECK EMPTY");
-        }
+    // モード切替
+    document.getElementById('mode_btn').addEventListener('click', () => {
+        isAuto = !isAuto;
+        play('ready');
+        document.getElementById('mode_display').innerText = isAuto ? "FULL-AUTO" : "SEMI-AUTO";
+    });
 
-        function playSound(name) {
-            sounds[name].currentTime = 0;
-            sounds[name].play().catch(e => console.log(e));
-        }
-    </script>
+    // リロード
+    document.getElementById('reload_btn').addEventListener('click', () => {
+        if (ammo === 12) return;
+        isReloading = true;
+        play('reload');
+        setTimeout(() => {
+            play('ready');
+            ammo = 12;
+            isReloading = false;
+            updateUI();
+        }, 1000); // 1秒後にリロード完了
+    });
+
+    function updateUI() {
+        document.getElementById('ammo_count').innerText = ammo + " / 12";
+    }
+</script>
 </body>
 </html>
